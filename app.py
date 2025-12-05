@@ -7,7 +7,6 @@ import datetime
 import shap
 from lime.lime_tabular import LimeTabularExplainer
 from pathlib import Path
-import os
 
 st.set_page_config(page_title="Option A v4 — NDVI Yield Intelligence", layout="wide")
 st.title("🌱 Option A v4 — NDVI Potato Yield Forecasting + SHAP + LIME")
@@ -15,24 +14,9 @@ st.title("🌱 Option A v4 — NDVI Potato Yield Forecasting + SHAP + LIME")
 DEFAULT_CSV = "/mnt/data/ndvi_optionb_cleaned.csv"
 DEFAULT_MODEL = "/mnt/data/rf_optionb_ndvi_model_v2.joblib"
 
-# --------------------------------------------------------------------
-# Sidebar: Upload or use default
-# --------------------------------------------------------------------
-st.sidebar.header("📁 Upload Data & Model")
-
-upload_csv = st.sidebar.file_uploader("Upload Cleaned NDVI CSV", type=["csv"])
-upload_model = st.sidebar.file_uploader("Upload Trained Model (.joblib)", type=["joblib"])
-
-csv_path = upload_csv if upload_csv else (DEFAULT_CSV if Path(DEFAULT_CSV).exists() else None)
-model_path = upload_model if upload_model else (DEFAULT_MODEL if Path(DEFAULT_MODEL).exists() else None)
-
-if csv_path is None or model_path is None:
-    st.warning("Please upload both NDVI CSV & Model or place them in /mnt/data/")
-    st.stop()
-
-# --------------------------------------------------------------------
-# Load data and model
-# --------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Load helpers
+# -----------------------------------------------------------------------------
 @st.cache_data
 def load_df(src):
     df = pd.read_csv(src)
@@ -43,20 +27,35 @@ def load_df(src):
 def load_rf_model(src):
     return joblib.load(src)
 
+# -----------------------------------------------------------------------------
+# Upload or use defaults
+# -----------------------------------------------------------------------------
+st.sidebar.header("📁 Upload Data & Model")
+upload_csv = st.sidebar.file_uploader("Upload Cleaned NDVI CSV", type=["csv"])
+upload_model = st.sidebar.file_uploader("Upload Model (.joblib)", type=["joblib"])
+
+csv_path = upload_csv if upload_csv else (DEFAULT_CSV if Path(DEFAULT_CSV).exists() else None)
+model_path = upload_model if upload_model else (DEFAULT_MODEL if Path(DEFAULT_MODEL).exists() else None)
+
+if csv_path is None or model_path is None:
+    st.warning("Please upload both NDVI CSV & model or place them under /mnt/data/")
+    st.stop()
+
 df = load_df(csv_path)
 rf = load_rf_model(model_path)
 
-# --------------------------------------------------------------------
-# Sidebar navigation
-# --------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Sidebar Navigation
+# -----------------------------------------------------------------------------
 page = st.sidebar.radio(
     "📌 Navigation",
-    ["Forecasting", "SHAP Explainability", "LIME Explainability", "Multi-County SHAP Comparison", "Storage Planner", "Downloads"]
+    ["Forecasting", "SHAP Explainability", "LIME Explainability",
+     "Multi-County SHAP Comparison", "Storage Planner", "Downloads"]
 )
 
-# --------------------------------------------------------------------
-# County selection and area override
-# --------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# County selection & area override
+# -----------------------------------------------------------------------------
 counties = sorted(df["admin_1"].dropna().unique())
 county = st.sidebar.selectbox("Select County", counties)
 
@@ -70,114 +69,112 @@ area_override = st.sidebar.number_input(
 
 cdf = df[df["admin_1"] == county].sort_values("harvest_year").reset_index(drop=True)
 
-# --------------------------------------------------------------------
-# Feature preparation for SHAP & LIME
-# --------------------------------------------------------------------
-def prepare_features(df_rows, area_override_value=None):
+# -----------------------------------------------------------------------------
+# Feature preparation (SHAP, LIME, Forecasting)
+# -----------------------------------------------------------------------------
+def prepare_features(df_rows, area_value=None):
     X = df_rows.copy().reset_index(drop=True)
     X_feat = pd.DataFrame()
 
     # Base numeric features
     X_feat["mean_annual_ndvi"] = X["mean_annual_ndvi"].astype(float)
-    X_feat["area"] = area_override_value if area_override_value else X["area"]
+    X_feat["area"] = area_value if area_value else X["area"]
 
-    # planting month (safe fallback)
+    # planting month FIXED (prevents crash)
     if "planting_month" in X.columns:
         X_feat["planting_month"] = X["planting_month"].fillna(1).astype(int)
     else:
         X_feat["planting_month"] = 1
 
-    # Time index
+    # year index
     if "harvest_year" in X.columns:
         X_feat["year_index"] = X["harvest_year"] - X["harvest_year"].min()
     else:
         X_feat["year_index"] = 0
 
-    # Add lag/roll features if present
     lag_features = [
         "yield_lag_1","yield_lag_2","yield_lag_3","yield_roll3",
         "ndvi_lag_1","ndvi_lag_2","ndvi_lag_3","ndvi_roll3","ndvi_change"
     ]
-
     for lf in lag_features:
         X_feat[lf] = X[lf] if lf in X.columns else 0.0
 
-    # County dummies
+    # County dummy features (if model was trained with them)
     if hasattr(rf, "feature_names_in_"):
         feats = list(rf.feature_names_in_)
         for f in feats:
             if f.startswith("adm1_"):
                 cname = f.replace("adm1_", "")
                 X_feat[f] = (X["admin_1"] == cname).astype(int)
-
-        X_feat = X_feat.reindex(columns=feats, fill_value=0)
+        X_feat = X_feat.reindex(columns=feats, fill_value=0.0)
 
     return X_feat
 
-# --------------------------------------------------------------------
-# Recursive Multi-Year Forecast
-# --------------------------------------------------------------------
-def recursive_forecast(agg_df, model, feats, years, area_val):
+# -----------------------------------------------------------------------------
+# Recursive Multi-Year Forecast (FIXED)
+# -----------------------------------------------------------------------------
+def recursive_forecast(agg_df, model, steps, area_value):
     hist = agg_df.copy().reset_index(drop=True)
     predictions = []
 
-    for step in range(years):
+    for _ in range(steps):
         last = hist.iloc[-1].copy()
 
-        # Add rolling/lag features
+        # Create missing fields required by model
+        last["planting_month"] = 1   # FIXED (avoid crash)
+
+        # lags
         for lag in [1, 2, 3]:
             last[f"yield_lag_{lag}"] = hist["yield"].iloc[-lag] if len(hist) >= lag else hist["yield"].iloc[-1]
-            last[f"ndvi_lag_{lag}"] = hist["mean_annual_ndvi"].iloc[-lag]
+            last[f"ndvi_lag_{lag}"] = hist["mean_annual_ndvi"].iloc[-lag] if len(hist) >= lag else hist["mean_annual_ndvi"].iloc[-1]
 
-        last["yield_roll3"] = hist["yield"].iloc[-3:].mean() if len(hist) >= 3 else hist["yield"].mean()
-        last["ndvi_roll3"] = hist["mean_annual_ndvi"].iloc[-3:].mean()
+        last["yield_roll3"] = hist["yield"].tail(3).mean()
+        last["ndvi_roll3"] = hist["mean_annual_ndvi"].tail(3).mean()
         last["ndvi_change"] = last["mean_annual_ndvi"] - last["ndvi_lag_1"]
 
         next_year = int(last["harvest_year"]) + 1
         last["year_index"] = next_year - agg_df["harvest_year"].min()
 
         # Build feature vector
-        X_next = prepare_features(pd.DataFrame([last]), area_val)
-        pred_yield = float(model.predict(X_next)[0])
-        pred_prod = pred_yield * area_val
+        X_next = prepare_features(pd.DataFrame([last]), area_value)
+        pred_y = float(model.predict(X_next)[0])
+        pred_prod = pred_y * area_value
 
         predictions.append({
             "harvest_year": next_year,
-            "predicted_yield": pred_yield,
+            "predicted_yield": pred_y,
             "predicted_production": pred_prod
         })
 
-        hist = pd.concat([
-            hist,
-            pd.DataFrame([{
-                "harvest_year": next_year,
-                "area": area_val,
-                "production": pred_prod,
-                "mean_annual_ndvi": last["mean_annual_ndvi"],
-                "yield": pred_yield,
-                "admin_1": last["admin_1"]
-            }])
-        ], ignore_index=True)
+        new_row = {
+            "harvest_year": next_year,
+            "area": area_value,
+            "production": pred_prod,
+            "mean_annual_ndvi": last["mean_annual_ndvi"],
+            "yield": pred_y,
+            "admin_1": last["admin_1"],
+            "planting_month": 1  # FIXED
+        }
+
+        hist = pd.concat([hist, pd.DataFrame([new_row])], ignore_index=True)
 
     return pd.DataFrame(predictions)
 
-# --------------------------------------------------------------------
-# Forecasting Page
-# --------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# PAGE: Forecasting
+# -----------------------------------------------------------------------------
 if page == "Forecasting":
     st.header(f"📈 Forecasting — {county}")
-
-    st.subheader("Input Dataset (Filtered)")
     st.dataframe(cdf.head())
 
-    # Aggregate yearly
     agg = cdf.groupby("harvest_year").agg({
-        "area": "sum",
+        "area": "mean",
         "production": "sum",
         "mean_annual_ndvi": "mean",
         "yield": "mean"
     }).reset_index()
     agg["admin_1"] = county
+    agg["planting_month"] = 1  # required for features
 
     last_year = int(agg["harvest_year"].max())
     current_year = datetime.datetime.now().year
@@ -188,85 +185,75 @@ if page == "Forecasting":
     )
 
     steps = target_year - last_year
-    feats = list(rf.feature_names_in_) if hasattr(rf, "feature_names_in_") else None
 
-    forecast_df = recursive_forecast(agg, rf, feats, steps, area_override)
+    forecast_df = recursive_forecast(agg, rf, steps, area_override)
 
     st.subheader("Forecast Results")
     st.dataframe(forecast_df)
 
-    final_prod = float(forecast_df.iloc[-1]["predicted_production"])
+    final_prod = forecast_df.iloc[-1]["predicted_production"]
     st.metric("Final Year Predicted Production (tonnes)", f"{final_prod:,.1f}")
 
-# --------------------------------------------------------------------
-# SHAP Explainability
-# --------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# PAGE: SHAP Explainability
+# -----------------------------------------------------------------------------
 elif page == "SHAP Explainability":
     st.header("🔍 SHAP Explainability")
-
-    if len(cdf) < 2:
-        st.warning("Not enough rows for SHAP.")
-        st.stop()
 
     X_shap = prepare_features(cdf, area_override)
     explainer = shap.TreeExplainer(rf)
 
-    sample_n = min(400, len(X_shap))
-    X_sample = X_shap.sample(sample_n, random_state=42)
+    # sample
+    X_sample = X_shap.sample(min(len(X_shap), 300), random_state=42)
 
-    st.subheader("Feature Importance (Summary Bar Plot)")
+    # Summary bar
     fig = plt.figure(figsize=(9, 5))
     shap.summary_plot(explainer.shap_values(X_sample), X_sample, plot_type="bar", show=False)
     st.pyplot(fig)
 
-    st.subheader("Feature Impact Distribution (Dot Plot)")
+    # Dot plot
     fig = plt.figure(figsize=(9, 5))
     shap.summary_plot(explainer.shap_values(X_sample), X_sample, show=False)
     st.pyplot(fig)
 
-    # Auto Narrative
+    # Auto Summary
     abs_vals = np.abs(explainer.shap_values(X_sample)).mean(axis=0)
-    sorted_feats = sorted(zip(X_sample.columns, abs_vals), key=lambda x: x[1], reverse=True)
+    ordered = sorted(zip(X_sample.columns, abs_vals), key=lambda x: x[1], reverse=True)
 
     st.subheader("📘 Automated SHAP Summary")
-    for i, (feat, score) in enumerate(sorted_feats[:8], 1):
+    for i, (feat, score) in enumerate(ordered[:10], 1):
         st.markdown(f"- **{i}. {feat}** — mean(|SHAP|) = **{score:.4f}**")
 
-# --------------------------------------------------------------------
-# LIME Explainability
-# --------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# PAGE: LIME Explainability
+# -----------------------------------------------------------------------------
 elif page == "LIME Explainability":
     st.header("🟩 LIME Explainability")
 
-    Xprep = prepare_features(cdf, area_override)
-    X_values = Xprep.values
+    X_lime = prepare_features(cdf, area_override)
+    X_vals = X_lime.values
 
-    lime_explainer = LimeTabularExplainer(
-        X_values,
-        feature_names=Xprep.columns.tolist(),
-        mode="regression",
-        verbose=False
+    explainer = LimeTabularExplainer(
+        X_vals,
+        feature_names=X_lime.columns.tolist(),
+        mode="regression"
     )
 
     idx = st.number_input(
-        "Select row index to explain:",
-        min_value=0, max_value=len(X_values) - 1, value=0
+        "Select row index:", min_value=0,
+        max_value=len(X_vals)-1, value=0
     )
 
-    exp = lime_explainer.explain_instance(
-        X_values[int(idx)],
-        rf.predict,
-        num_features=10
-    )
+    exp = explainer.explain_instance(X_vals[int(idx)], rf.predict, num_features=10)
 
     st.subheader("Top LIME Feature Contributions")
     st.json(exp.as_list())
 
     st.pyplot(exp.as_pyplot_figure())
 
-# --------------------------------------------------------------------
-# Multi-County SHAP Comparison
-# --------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# PAGE: Multi-County SHAP Comparison
+# -----------------------------------------------------------------------------
 elif page == "Multi-County SHAP Comparison":
     st.header("🌍 Multi-County SHAP Comparison")
 
@@ -280,7 +267,6 @@ elif page == "Multi-County SHAP Comparison":
     XB = prepare_features(dfB, area_override)
 
     explainer = shap.TreeExplainer(rf)
-
     svA = np.abs(explainer.shap_values(XA)).mean(axis=0)
     svB = np.abs(explainer.shap_values(XB)).mean(axis=0)
 
@@ -292,19 +278,16 @@ elif page == "Multi-County SHAP Comparison":
 
     st.dataframe(comp)
 
-    st.subheader("Automated Comparison Summary")
-    st.write(f"- **{c1}** most influenced by **{comp.iloc[0]['feature']}**.")
-    st.write(f"- **{c2}** most influenced by **{comp.sort_values(c2, ascending=False).iloc[0]['feature']}**.")
-
-# --------------------------------------------------------------------
-# Storage Planner
-# --------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# PAGE: Storage Planner
+# -----------------------------------------------------------------------------
 elif page == "Storage Planner":
     st.header("❄ Cold Storage Planner")
 
-    tonnes = st.number_input("Enter tonnage:", min_value=0.0, value=0.0)
+    tonnes = st.number_input("Enter production (tonnes):", min_value=0.0, value=0.0)
 
-    def pack_storage(tonnes, sizes=[1000, 500, 250]):
+    def storage_plan(tonnes):
+        sizes = [1000, 500, 250]
         allocation = []
         rem = tonnes
         type_id = 1
@@ -322,21 +305,25 @@ elif page == "Storage Planner":
         return allocation
 
     if tonnes > 0:
-        st.json(pack_storage(tonnes))
+        st.json(storage_plan(tonnes))
 
-# --------------------------------------------------------------------
-# Downloads
-# --------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# PAGE: Download Models/Data
+# -----------------------------------------------------------------------------
 elif page == "Downloads":
     st.header("⬇ Downloads")
 
     if Path(DEFAULT_CSV).exists():
-        st.download_button("Download Cleaned CSV", open(DEFAULT_CSV, "rb").read(), file_name="ndvi_cleaned.csv")
+        st.download_button("Download Cleaned CSV",
+                           open(DEFAULT_CSV, "rb").read(),
+                           file_name="ndvi_optionb_cleaned.csv")
 
     if Path(DEFAULT_MODEL).exists():
-        st.download_button("Download Trained Model", open(DEFAULT_MODEL, "rb").read(), file_name="ndvi_model.joblib")
+        st.download_button("Download Model",
+                           open(DEFAULT_MODEL, "rb").read(),
+                           file_name="rf_optionb_ndvi_model_v2.joblib")
 
-st.caption("Option A v4 — Forecasting + SHAP + LIME + Storage Engine")
+st.caption("🔥 Option A v4 — Enhanced Forecasting + SHAP + LIME + Storage Engine")
 
 # # app_v3.py
 # import streamlit as st
