@@ -1,0 +1,109 @@
+{
+  "input_path": "/content/ndvi_filled_option_c_poly.xlsx",
+  "clean_csv": "/content/ndvi_optionb_cleaned.csv",
+  "model_path": "/content/rf_optionb_ndvi_model_v2.joblib",
+  "n_rows_original": 562,
+  "n_rows_cleaned": 562,
+  "n_rows_modeling": 524,
+  "unique_counties": 32,
+  "last_harvest_year_used_as_test": 2021,
+  "train_rows": 495,
+  "test_rows": 29,
+  "evaluation": {
+    "mae": 1.771960523571059,
+    "rmse": 2.4526329433850322,
+    "r2": 0.5484536395639259
+  },
+  "features": [
+    "mean_annual_ndvi",
+    "area",
+    "planting_month",
+    "year_index",
+    "yield_lag_1",
+    "yield_lag_2",
+    "yield_lag_3",
+    "yield_roll3",
+    "ndvi_lag_1",
+    "ndvi_lag_2",
+    "ndvi_lag_3",
+    "ndvi_roll3",
+    "ndvi_change",
+    "adm1_Baringo",
+    "adm1_Bomet",
+    "adm1_Bungoma",
+    "adm1_Elgeyo-Marakwet",
+    "adm1_Embu",
+    "adm1_Homa Bay",
+    "adm1_Kajiado",
+    "adm1_Kakamega",
+    "adm1_Kericho",
+    "adm1_Kiambu",
+    "adm1_Kirinyaga",
+    "adm1_Kisii",
+    "adm1_Kwale",
+    "adm1_Laikipia",
+    "adm1_Machakos",
+    "adm1_Makueni",
+    "adm1_Meru",
+    "adm1_Murang'a",
+    "adm1_Nairobi",
+    "adm1_Nakuru",
+    "adm1_Nandi",
+    "adm1_Narok",
+    "adm1_Nyamira",
+    "adm1_Nyandarua",
+    "adm1_Nyeri",
+    "adm1_Samburu",
+    "adm1_Taita Taveta",
+    "adm1_Tharaka Nithi",
+    "adm1_Trans Nzoia",
+    "adm1_Uasin Gishu",
+    "adm1_Vihiga",
+    "adm1_West Pokot"
+  ],
+  "shap_summary": [
+    {
+      "feature": "mean_annual_ndvi",
+      "mean_abs_shap": 2.2499421055541697
+    },
+    {
+      "feature": "yield_lag_1",
+      "mean_abs_shap": 0.6845567297044783
+    },
+    {
+      "feature": "ndvi_change",
+      "mean_abs_shap": 0.18414116593115384
+    },
+    {
+      "feature": "year_index",
+      "mean_abs_shap": 0.10536403723572853
+    },
+    {
+      "feature": "area",
+      "mean_abs_shap": 0.07629500829947021
+    },
+    {
+      "feature": "yield_roll3",
+      "mean_abs_shap": 0.07468499584229772
+    },
+    {
+      "feature": "yield_lag_2",
+      "mean_abs_shap": 0.05631503304220053
+    },
+    {
+      "feature": "yield_lag_3",
+      "mean_abs_shap": 0.04853963667190652
+    },
+    {
+      "feature": "ndvi_lag_1",
+      "mean_abs_shap": 0.04174184804124847
+    },
+    {
+      "feature": "ndvi_roll3",
+      "mean_abs_shap": 0.038960667718514884
+    }
+  ],
+  "lime_summary": {
+    "error": "No module named 'lime'"
+  }
+}
