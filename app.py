@@ -9,7 +9,7 @@ from lime.lime_tabular import LimeTabularExplainer
 from pathlib import Path
 
 st.set_page_config(page_title="Option A v4 — NDVI Yield Intelligence", layout="wide")
-st.title("🌱 Option A v4 — NDVI Potato Yield Forecasting + SHAP + LIME")
+st.title("🌱 Cold Storage Engine")
 
 DEFAULT_CSV = "/mnt/data/ndvi_optionb_cleaned.csv"
 DEFAULT_MODEL = "/mnt/data/rf_optionb_ndvi_model_v2.joblib"
