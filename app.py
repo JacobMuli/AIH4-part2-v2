@@ -250,6 +250,9 @@ elif page == "LIME Explainability":
     st.json(exp.as_list())
 
     st.pyplot(exp.as_pyplot_figure())
+    st.subheader("Raw Data for Selected Row")
+    st.write(cdf.iloc[int(idx)])
+
 
 # -----------------------------------------------------------------------------
 # PAGE: Multi-County SHAP Comparison
