@@ -80,8 +80,13 @@ def prepare_features(df_rows, area_override_value=None):
     # Base numeric features
     X_feat["mean_annual_ndvi"] = X["mean_annual_ndvi"].astype(float)
     X_feat["area"] = area_override_value if area_override_value else X["area"]
-    X_feat["planting_month"] = X.get("planting_month", 1).fillna(1)
-    
+
+    # planting month (safe fallback)
+    if "planting_month" in X.columns:
+        X_feat["planting_month"] = X["planting_month"].fillna(1).astype(int)
+    else:
+        X_feat["planting_month"] = 1
+
     # Time index
     if "harvest_year" in X.columns:
         X_feat["year_index"] = X["harvest_year"] - X["harvest_year"].min()
@@ -93,17 +98,19 @@ def prepare_features(df_rows, area_override_value=None):
         "yield_lag_1","yield_lag_2","yield_lag_3","yield_roll3",
         "ndvi_lag_1","ndvi_lag_2","ndvi_lag_3","ndvi_roll3","ndvi_change"
     ]
+
     for lf in lag_features:
         X_feat[lf] = X[lf] if lf in X.columns else 0.0
 
-    # County dummies if model expects them
+    # County dummies
     if hasattr(rf, "feature_names_in_"):
         feats = list(rf.feature_names_in_)
         for f in feats:
             if f.startswith("adm1_"):
-                county_name = f.replace("adm1_", "")
-                X_feat[f] = (X["admin_1"] == county_name).astype(int)
-        X_feat = X_feat.reindex(columns=feats, fill_value=0.0)
+                cname = f.replace("adm1_", "")
+                X_feat[f] = (X["admin_1"] == cname).astype(int)
+
+        X_feat = X_feat.reindex(columns=feats, fill_value=0)
 
     return X_feat
 
